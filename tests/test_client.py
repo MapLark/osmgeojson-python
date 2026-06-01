@@ -1,0 +1,180 @@
+"""Tests for OSMGeoJSONClient - happy paths and error handling."""
+
+from __future__ import annotations
+
+import pytest
+import responses as rsps
+from urllib.parse import parse_qs, urlsplit
+
+from osmgeojson import (
+    OSMGeoJSONAuthError,
+    OSMGeoJSONAPIError,
+    OSMGeoJSONRateLimitError,
+    CostEstimate,
+    OSMFeatureCollection,
+)
+from tests.conftest import ELEMENTS_URL, COST_URL, make_test_feature, make_feature_collection
+
+
+# ---------------------------------------------------------------------------
+# query()
+# ---------------------------------------------------------------------------
+
+
+@rsps.activate
+def test_query_returns_feature_collection(client):
+    features = [make_test_feature("way/1"), make_test_feature("way/2")]
+    rsps.add(rsps.GET, ELEMENTS_URL, json=make_feature_collection(features))
+
+    result = client.query(bbox="18.06,59.32,18.09,59.34")
+
+    assert isinstance(result, OSMFeatureCollection)
+    assert len(result.features) == 2
+    assert result.features[0].id == "way/1"
+    assert result.features[0].osm_type == "way"
+    assert result.features[0].osm_id == 1
+
+
+@rsps.activate
+def test_query_sends_auth_header(client):
+    rsps.add(rsps.GET, ELEMENTS_URL, json=make_feature_collection([]))
+
+    client.query(bbox="18.06,59.32,18.09,59.34")
+
+    assert rsps.calls[0].request.headers["Authorization"] == "Bearer sk-test-1234"
+
+
+@rsps.activate
+def test_query_repeatable_tags(client):
+    rsps.add(rsps.GET, ELEMENTS_URL, json=make_feature_collection([]))
+
+    client.query(bbox="18.06,59.32,18.09,59.34", tags=["building", "name=City Hall"])
+
+    qs = rsps.calls[0].request.url
+    assert "tags=building" in qs
+    assert "tags=name" in qs
+
+
+@rsps.activate
+def test_query_single_type_param(client):
+    rsps.add(rsps.GET, ELEMENTS_URL, json=make_feature_collection([]))
+
+    client.query(bbox="18.06,59.32,18.09,59.34", type="way")
+
+    qs = rsps.calls[0].request.url
+    assert "type=way" in qs
+
+
+@rsps.activate
+def test_query_comma_separated_type_param(client):
+    rsps.add(rsps.GET, ELEMENTS_URL, json=make_feature_collection([]))
+
+    client.query(bbox="18.06,59.32,18.09,59.34", type="way,relation")
+
+    qs = rsps.calls[0].request.url
+    assert "type=way%2Crelation" in qs
+
+
+@rsps.activate
+def test_query_type_list_uses_single_comma_separated_query_value(client):
+    """Regression: list-valued type must not emit repeated type keys."""
+    rsps.add(rsps.GET, ELEMENTS_URL, json=make_feature_collection([]))
+
+    client.query(bbox="18.06,59.32,18.09,59.34", type=["node", "way"])
+
+    qs = rsps.calls[0].request.url
+    assert "type=node%2Cway" in qs
+    assert qs.count("type=") == 1
+
+    parsed = parse_qs(urlsplit(qs).query)
+    assert parsed["type"] == ["node,way"]
+
+
+@rsps.activate
+def test_query_raises_auth_error_on_401(client):
+    rsps.add(rsps.GET, ELEMENTS_URL, status=401, body="Unauthorized")
+
+    with pytest.raises(OSMGeoJSONAuthError):
+        client.query(bbox="18.06,59.32,18.09,59.34")
+
+
+@rsps.activate
+def test_query_raises_api_error_on_500(client):
+    rsps.add(rsps.GET, ELEMENTS_URL, status=500, body="Internal Server Error")
+
+    with pytest.raises(OSMGeoJSONAPIError) as exc_info:
+        client.query(bbox="18.06,59.32,18.09,59.34")
+
+    assert exc_info.value.status_code == 500
+
+
+@rsps.activate
+def test_query_meta_populated(client):
+    rsps.add(rsps.GET, ELEMENTS_URL, json=make_feature_collection([make_test_feature()], has_more=True, next_offset=1))
+
+    result = client.query(bbox="18.06,59.32,18.09,59.34")
+
+    assert result.meta.has_more is True
+    assert result.meta.next_offset == 1
+
+
+# ---------------------------------------------------------------------------
+# estimate_cost()
+# ---------------------------------------------------------------------------
+
+
+@rsps.activate
+def test_estimate_cost_returns_cost_estimate(client):
+    cost_resp = {
+        "estimated_credits": 42,
+        "tier_limits": {"max_bbox_area_tagged": 1.0},
+        "hints": ["Consider narrowing your bbox."],
+    }
+    rsps.add(rsps.GET, COST_URL, json=cost_resp)
+
+    result = client.estimate_cost(bbox="18.06,59.32,18.09,59.34", tags=["building"])
+
+    assert isinstance(result, CostEstimate)
+    assert result.estimated_credits == 42
+    assert result.hints == ["Consider narrowing your bbox."]
+
+
+@rsps.activate
+def test_estimate_cost_raises_auth_error_on_401(client):
+    rsps.add(rsps.GET, COST_URL, status=401, body="Unauthorized")
+
+    with pytest.raises(OSMGeoJSONAuthError):
+        client.estimate_cost(bbox="18.06,59.32,18.09,59.34")
+
+
+# ---------------------------------------------------------------------------
+# Feature model helpers
+# ---------------------------------------------------------------------------
+
+
+def test_feature_properties():
+    from osmgeojson import OSMFeature
+    f = OSMFeature(
+        id="relation/999",
+        geometry={"type": "MultiPolygon", "coordinates": []},
+        properties={"tags": {"name": "Stockholm"}, "centroid": {"type": "Point", "coordinates": [18.07, 59.33]}},
+    )
+    assert f.osm_type == "relation"
+    assert f.osm_id == 999
+    assert f.tags == {"name": "Stockholm"}
+    assert f.centroid is not None
+
+
+# ---------------------------------------------------------------------------
+# Context manager
+# ---------------------------------------------------------------------------
+
+
+@rsps.activate
+def test_client_context_manager(client):
+    rsps.add(rsps.GET, ELEMENTS_URL, json=make_feature_collection([]))
+
+    with client as c:
+        result = c.query(bbox="18.06,59.32,18.09,59.34")
+
+    assert isinstance(result, OSMFeatureCollection)

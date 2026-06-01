@@ -1,0 +1,94 @@
+"""Tests for _chunking.py."""
+
+from __future__ import annotations
+
+import pytest
+
+from osmgeojson import parse_bbox, split_bbox, bbox_area_deg2, merge_features, around_to_bbox
+
+
+class TestParseBbox:
+    def test_valid(self) -> None:
+        assert parse_bbox("1.0,2.0,3.0,4.0") == (1.0, 2.0, 3.0, 4.0)
+
+    def test_invalid_parts(self) -> None:
+        with pytest.raises(ValueError, match="Invalid bbox format"):
+            parse_bbox("1.0,2.0,3.0")
+
+
+class TestBboxAreaDeg2:
+    def test_small_area(self) -> None:
+        area = bbox_area_deg2("18.0,59.0,18.1,59.1")
+        assert abs(area - 0.01) < 1e-9
+
+    def test_zero_span(self) -> None:
+        assert bbox_area_deg2("18.0,59.0,18.0,59.0") == 0.0
+
+
+class TestSplitBbox:
+    def test_no_split_needed(self) -> None:
+        bbox = "18.0,59.0,18.1,59.1"
+        chunks = split_bbox(bbox, max_area_deg2=1.0)
+        assert chunks == [bbox]
+
+    def test_splits_into_multiple_chunks(self) -> None:
+        # 1x1 deg bbox -> split into chunks <= 0.1 deg^2
+        chunks = split_bbox("0.0,0.0,1.0,1.0", max_area_deg2=0.1)
+        assert len(chunks) > 1
+
+    def test_each_chunk_within_limit(self) -> None:
+        max_area = 0.05
+        chunks = split_bbox("0.0,0.0,1.0,1.0", max_area_deg2=max_area)
+        for c in chunks:
+            assert bbox_area_deg2(c) <= max_area + 1e-9, f"Chunk {c} exceeds limit"
+
+    def test_chunks_cover_full_area(self) -> None:
+        # Total area of all chunks should equal original area (no gaps, no overlap in sum)
+        original = bbox_area_deg2("0.0,0.0,1.0,1.0")
+        chunks = split_bbox("0.0,0.0,1.0,1.0", max_area_deg2=0.1)
+        total = sum(bbox_area_deg2(c) for c in chunks)
+        assert abs(total - original) < 1e-9
+
+    def test_invalid_max_area(self) -> None:
+        with pytest.raises(ValueError):
+            split_bbox("0.0,0.0,1.0,1.0", max_area_deg2=0)
+
+    def test_returns_valid_bbox_strings(self) -> None:
+        for chunk in split_bbox("0.0,0.0,1.0,1.0", max_area_deg2=0.25):
+            min_lon, min_lat, max_lon, max_lat = parse_bbox(chunk)
+            assert min_lon < max_lon
+            assert min_lat < max_lat
+
+
+class TestMergeFeatures:
+    def test_deduplicates_by_id(self) -> None:
+        f1 = {"id": "way/1", "geometry": {}, "properties": {}}
+        f2 = {"id": "way/2", "geometry": {}, "properties": {}}
+        f1_dup = {"id": "way/1", "geometry": {}, "properties": {"extra": True}}
+
+        result = merge_features([[f1, f2], [f1_dup]])
+        assert len(result) == 2
+        ids = [f["id"] for f in result]
+        assert ids == ["way/1", "way/2"]
+
+    def test_preserves_order(self) -> None:
+        features = [{"id": f"way/{i}", "geometry": {}, "properties": {}} for i in range(5)]
+        result = merge_features([features])
+        assert [f["id"] for f in result] == [f"way/{i}" for i in range(5)]
+
+    def test_empty_input(self) -> None:
+        assert merge_features([]) == []
+        assert merge_features([[]]) == []
+
+
+class TestAroundToBbox:
+    def test_symmetric(self) -> None:
+        bbox_str = around_to_bbox(18.065, 59.33, 1000)
+        min_lon, min_lat, max_lon, max_lat = parse_bbox(bbox_str)
+        assert min_lon < 18.065 < max_lon
+        assert min_lat < 59.33 < max_lat
+
+    def test_larger_radius_gives_larger_bbox(self) -> None:
+        small = bbox_area_deg2(around_to_bbox(0.0, 0.0, 500))
+        large = bbox_area_deg2(around_to_bbox(0.0, 0.0, 5000))
+        assert large > small
