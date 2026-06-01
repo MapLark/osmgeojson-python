@@ -161,4 +161,13 @@ Run one example app:
 pytest tests/example_apps/test_restaurant_guide.py -v
 ```
 
+## Release notes
+
+### 0.1.0 (2026-06-01)
+
+- First PyPI release of `osmgeojson`.
+- Includes sync and async clients with query, auto-pagination, and large-area chunked querying.
+- Adds CLI commands and convenience helpers for common OSM datasets.
+- Ships typed models and optional geospatial extras (`pandas`, `geopandas`, `shapely`).
+
 See [https://maplark.com/developer](https://maplark.com/developer) for full API docs.
