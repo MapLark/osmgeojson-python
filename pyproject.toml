@@ -48,8 +48,8 @@ test = [
 osmgeojson = "osmgeojson.cli:cli"
 
 [project.urls]
-Homepage = "https://github.com/solis-aurum/osmgeojson-python"
-Repository = "https://github.com/solis-aurum/osmgeojson-python"
+Homepage = "www.maplark.com"
+Repository = "https://github.com/MapLark/osmgeojson-python"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/osmgeojson"]
