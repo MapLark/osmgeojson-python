@@ -9,7 +9,7 @@ description = "Python SDK for the MapLark OSM GeoJSON API to query OpenStreetMap
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
-keywords = ["openstreetmap", "osm", "geojson", "geospatial", "maplark"]
+keywords = ["openstreetmap", "osm", "geojson", "geospatial", "maps"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -48,7 +48,7 @@ test = [
 osmgeojson = "osmgeojson.cli:cli"
 
 [project.urls]
-Homepage = "www.maplark.com"
+Homepage = "https://maplark.com"
 Repository = "https://github.com/MapLark/osmgeojson-python"
 
 [tool.hatch.build.targets.wheel]
